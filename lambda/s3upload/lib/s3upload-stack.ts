@@ -1,4 +1,9 @@
 import * as cdk from 'aws-cdk-lib'
+import {
+  LambdaIntegration,
+  MethodLoggingLevel,
+  RestApi,
+} from 'aws-cdk-lib/aws-apigateway'
 import { Effect, PolicyStatement, ServicePrincipal } from 'aws-cdk-lib/aws-iam'
 import { Architecture, Runtime } from 'aws-cdk-lib/aws-lambda'
 import {
@@ -6,17 +11,28 @@ import {
   NodejsFunctionProps,
 } from 'aws-cdk-lib/aws-lambda-nodejs'
 import { RetentionDays } from 'aws-cdk-lib/aws-logs'
-import { Bucket } from 'aws-cdk-lib/aws-s3'
+import { BlockPublicAccess, Bucket, ObjectOwnership } from 'aws-cdk-lib/aws-s3'
 import { Construct } from 'constructs'
 import { join } from 'path'
 
 export class S3UploadStack extends cdk.Stack {
+  private restApi: RestApi
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props)
+
+    this.restApi = new RestApi(this, this.stackName + '_RestApi', {
+      cloudWatchRole: true,
+      deployOptions: {
+        stageName: 'dev',
+        loggingLevel: MethodLoggingLevel.INFO,
+      },
+    })
 
     // The code that defines your stack goes here
     const wondebucket = new Bucket(this, 'wondebucketjay', {
       bucketName: 'wondebucketjay',
+      objectOwnership: ObjectOwnership.BUCKET_OWNER_ENFORCED,
+      blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     })
 
@@ -29,6 +45,7 @@ export class S3UploadStack extends cdk.Stack {
         resources: [`${wondebucket.bucketArn}/*`],
       })
     )
+    // wondebucket.grantReadWrite(new AccountRootPrincipal())
 
     // Lambda
     const uploadLambda = new NodejsFunction(this, 'Upload', {
@@ -43,9 +60,10 @@ export class S3UploadStack extends cdk.Stack {
       new PolicyStatement({
         effect: Effect.ALLOW,
         actions: ['s3:*'],
-        resources: [`${wondebucket.bucketArn}/*`],
+        resources: [wondebucket.bucketArn, `${wondebucket.bucketArn}/*`],
       })
     )
+    this.restApi.root.addMethod('POST', new LambdaIntegration(uploadLambda, {}))
   }
 }
 
